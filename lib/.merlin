@@ -1,0 +1,9 @@
+B ../_build/default/lib/.Radis.objs
+B /home/dinosaure/.opam/4.05.0/lib/fmt
+B /home/dinosaure/.opam/4.05.0/lib/result
+B /home/dinosaure/.opam/4.05.0/lib/uchar
+FLG -w -40
+S .
+S /home/dinosaure/.opam/4.05.0/lib/fmt
+S /home/dinosaure/.opam/4.05.0/lib/result
+S /home/dinosaure/.opam/4.05.0/lib/uchar
