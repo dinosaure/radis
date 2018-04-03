@@ -41,6 +41,7 @@ module type KEY =
 sig
   type t
 
+  val equal: t -> t -> bool
   val get: t -> int -> char
   val length: t -> int
 end
@@ -77,7 +78,9 @@ struct
       | Inf of int
       | Sup of int
 
-    let rec compare value1 off1 len1 value2 off2 len2 =
+    let rec compare
+      : key -> int -> int -> key -> int -> int -> t
+      = fun value1 off1 len1 value2 off2 len2 ->
       if off1 = len1
       then if off2 = len2
           then Eq
@@ -88,7 +91,7 @@ struct
             let c1 = Key.get value1 off1 in
             let c2 = Key.get value2 off2 in
 
-            if c1 = c2
+            if Char.code c1 - Char.code c2 = 0
             then compare value1 (off1 + 1) len1 value2 (off2 + 1) len2
             else if c1 < c2
             then Inf off1
@@ -183,19 +186,24 @@ struct
 
   let rec lookup key off keylen tree = match tree with
     | L (k, v) ->
-      if key = k then Some v else None
-    | T (m, k, v) ->
-      (let kl = Key.length k in
-      match Compare.compare key off keylen k off kl with
-      | Compare.Eq | Compare.Prefix -> Some v
-      | Compare.Contain -> lookup key kl keylen m
-      | Compare.Inf _ | Compare.Sup _ -> None)
+       if Key.equal key k then Some v else None
     | B (l, r, i, b) ->
-      if keylen > i
-      then let dir = if ((Char.code (Key.get key i)) land (1 lsl b)) = 0
-                     then l else r in
-          lookup key i keylen dir
-      else None
+       if keylen > i
+       then let dir =
+              if ((Char.code (Key.get key i)) land (1 lsl b)) = 0
+              then l else r in
+            lookup key i keylen dir
+       else None
+    | T (m, k, v) ->
+       if Key.equal k key
+       then Some v
+       else
+         let kl = Key.length k in
+         match Compare.compare key off keylen k off kl with
+         | Compare.Eq | Compare.Prefix -> Some v
+         | Compare.Contain -> lookup key kl keylen m
+         | Compare.Inf _ | Compare.Sup _ -> None
+
 
   let lookup tree key =
     match tree with

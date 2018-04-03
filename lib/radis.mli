@@ -21,6 +21,7 @@ module type KEY =
 sig
   type t
 
+  val equal: t -> t -> bool
   val get: t -> int -> char
   val length: t -> int
 end
