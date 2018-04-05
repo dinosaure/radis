@@ -40,14 +40,20 @@ let objects_10 = take objects 10
 
 let radix lst = List.fold_left (fun map (k, v) -> Radix.bind map k v) Radix.empty lst
 let map lst = List.fold_left (fun map (k, v) -> Map.add k v map) Map.empty lst
+let hashtbl ?(size = 128) lst =
+  let hashtbl = Hashtbl.create size in
+  List.iter (fun (k, v) -> Hashtbl.add hashtbl k v) lst;
+  hashtbl
 
 let bench_add ?(time = 3) ?(repeat = 3) n =
   let lst = take objects n in
-  let radix () = ignore @@ radix lst in
-  let map ()   = ignore @@ map lst in
+  let radix ()   = ignore @@ radix lst in
+  let map ()     = ignore @@ map lst in
+  let hashtbl () = ignore @@ hashtbl lst in
   Benchmark.throughputN time ~repeat
-    [ "radix", radix, ()
-    ; "map",   map,   () ]
+    [ "radix",   radix,   ()
+    ; "map",     map,     ()
+    ; "hashtbl", hashtbl, () ]
 
 let bench_lookup_one ?(time = 3) ?(repeat = 3) key n =
   let lst = take objects n in
@@ -57,22 +63,28 @@ let bench_lookup_one ?(time = 3) ?(repeat = 3) key n =
 
   let r = radix lst in
   let m = map lst in
-  let radix () = ignore @@ Radix.lookup r key in
-  let map ()   = ignore @@ Map.find_opt key m in
+  let h = hashtbl lst in
+  let radix ()   = ignore @@ Radix.lookup r key in
+  let map ()     = ignore @@ Map.find_opt key m in
+  let hashtbl () = ignore @@ Hashtbl.find_opt h key in
   Benchmark.throughputN time ~repeat
-    [ "radix", radix, ()
-    ; "map",   map,   () ]
+    [ "radix",   radix,   ()
+    ; "map",     map,     ()
+    ; "hashtbl", hashtbl, () ]
 
 let bench_lookup_all ?(time = 3) ?(repeat = 3) n =
   let lst = take objects n in
   let key = List.map fst lst in
   let r = radix lst in
   let m = map lst in
-  let radix () = List.iter (fun k -> ignore @@ Radix.lookup r k) key in
-  let map   () = List.iter (fun k -> ignore @@ Map.find_opt k m) key in
+  let h = hashtbl lst in
+  let radix   () = List.iter (fun k -> ignore @@ Radix.lookup r k) key in
+  let map     () = List.iter (fun k -> ignore @@ Map.find_opt k m) key in
+  let hashtbl () = List.iter (fun k -> ignore @@ Hashtbl.find_opt h k) key in
   Benchmark.throughputN time ~repeat
-    [ "radix", radix, ()
-    ; "map",   map,   () ]
+    [ "radix",   radix,   ()
+    ; "map",     map,     ()
+    ; "hashtbl", hashtbl, () ]
 
 let bench_mem_one ?(time = 3) ?(repeat = 3) (n, key) =
   let lst = take objects n in
@@ -89,13 +101,17 @@ let app_int f n = Benchmark.Tree.(string_of_int n @> lazy (f n))
 let () =
   let open Benchmark.Tree in
   register
-    ("root" @>>>
+    ("radis" @>>>
        [ "add" @>>
            concat
-             [ app_int (bench_add ~repeat:3 ~time:2) 10 ]
+             [ app_int (bench_add ~repeat:3 ~time:2) 10
+             ; app_int (bench_add ~repeat:3 ~time:2) 100
+             ; app_int (bench_add ~repeat:3 ~time:2) 1000 ]
        ; "lookup_all" @>>
            concat
-             [ app_int (bench_lookup_all ~repeat:3 ~time:2) 10 ] ])
+             [ app_int (bench_lookup_all ~repeat:3 ~time:2) 10
+             ; app_int (bench_lookup_all ~repeat:3 ~time:2) 100
+             ; app_int (bench_lookup_all ~repeat:3 ~time:2) 1000 ] ])
 
 let () =
   try Benchmark.Tree.run_global ()
