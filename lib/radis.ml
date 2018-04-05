@@ -65,7 +65,7 @@ sig
   val pp: (key * 'a) Fmt.t -> 'a t Fmt.t
 end
 
-module Make (Key: KEY): S with type key = Key.t =
+module Make (Key: KEY) =
 struct
   type key = Key.t
 
@@ -98,18 +98,22 @@ struct
             else (* c1 > c2 *) Sup off1
   end
 
-  let critbit c1 c2 =
-    let rec aux p c1 c2 =
-      if (c1 land 128) <> (c2 land 128)
-      then p
-      else aux (p - 1) (c1 lsl 1) (c2 lsl 1)
-    in
+  let table =
+    [| 0;1;2;2;3;3;3;3;4;4;4;4;4;4;4;4;5;5;5;5;5;5;5;5;5;5;5;5;5;5;5;5;
+       6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;6;
+       7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;
+       7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;7;
+       8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;
+       8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;
+       8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;
+       8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8;8 |]
 
+  let ffs byte = Array.unsafe_get table byte
+
+  let critbit c1 c2 =
     if c1 = c2
     then raise Not_found
-    else aux 7 (Char.code c1) (Char.code c2)
-  (* XXX(dinosaure): a XOR and find first bit should be more
-     efficient. *)
+    else ffs ((Char.code c1) lxor (Char.code c2)) - 1
 
   type 'a node =
     | L of Key.t * 'a
@@ -134,48 +138,54 @@ struct
 
   let rec bind key off keylen value tree = match tree with
     | L (k, v) ->
-      (let kl = Key.length k in
-      match Compare.compare key off keylen k off kl with
-      | Compare.Eq -> L (k, value) (* replace *)
-      | Compare.Prefix -> T (tree, key, value)
-      | Compare.Contain -> T (L (key, value), k, v)
-      | Compare.Inf p ->
-        let b = critbit (Key.get key p) (Key.get k p) in
-        B (L (key, value), tree, p, b)
-      | Compare.Sup p ->
-        let b = critbit (Key.get key p) (Key.get k p) in
-        B (tree, L (key, value), p, b))
-    | T (m, k, v) ->
-      (let kl = Key.length k in
-      match Compare.compare key off keylen k off kl with
-      | Compare.Eq -> T (m, k, value) (* replace *)
-      | Compare.Prefix -> T (tree, key, value)
-      | Compare.Contain -> T (bind key kl keylen value m, k, v)
-      | Compare.Inf p ->
-        let b = critbit (Key.get key p) (Key.get k p) in
-        B (L (key, value), tree, p, b)
-      | Compare.Sup p ->
-        let b = critbit (Key.get key p) (Key.get k p) in
-        B (tree, L (key, value), p, b))
-    | B (l, r, i, b) ->
-      if keylen > i
-      then if ((Char.code (Key.get key i)) land (1 lsl b)) = 0
-          then B (bind key i keylen value l, r, i, b)
-          else B (l, bind key i keylen value r, i, b)
-      else let k = first_key l in
-          match Compare.compare key off keylen k off keylen with
-          | Compare.Eq | Compare.Prefix -> T (tree, key, value)
-          | Compare.Contain -> B (bind key i keylen value l, r, i, b)
+       if Key.equal key k
+       then L (k, value)
+       else
+         (let kl = Key.length k in
+          match Compare.compare key off keylen k off kl with
+          | Compare.Eq -> L (k, value) (* replace *)
+          | Compare.Prefix -> T (tree, key, value)
+          | Compare.Contain -> T (L (key, value), k, v)
           | Compare.Inf p ->
-            if p = i
-            then B (bind key i keylen value l, r, i, b)
-            else let bn = critbit (Key.get key p) (Key.get k p) in
-                  B (L (key, value), tree, p, bn)
+             let b = critbit (Key.get key p) (Key.get k p) in
+             B (L (key, value), tree, p, b)
           | Compare.Sup p ->
-            if p = i
-            then B (l, bind key i keylen value r, i, b)
-            else let bn = critbit (Key.get key p) (Key.get k p) in
-                  B (tree, L (key, value), p, bn)
+             let b = critbit (Key.get key p) (Key.get k p) in
+             B (tree, L (key, value), p, b))
+    | T (m, k, v) ->
+       if Key.equal key k
+       then T (m, k, value)
+       else
+         (let kl = Key.length k in
+          match Compare.compare key off keylen k off kl with
+          | Compare.Eq -> T (m, k, value) (* replace *)
+          | Compare.Prefix -> T (tree, key, value)
+          | Compare.Contain -> T (bind key kl keylen value m, k, v)
+          | Compare.Inf p ->
+             let b = critbit (Key.get key p) (Key.get k p) in
+             B (L (key, value), tree, p, b)
+          | Compare.Sup p ->
+             let b = critbit (Key.get key p) (Key.get k p) in
+             B (tree, L (key, value), p, b))
+    | B (l, r, i, b) ->
+       if keylen > i
+       then if ((Char.code (Key.get key i)) land (1 lsl b)) = 0
+            then B (bind key i keylen value l, r, i, b)
+            else B (l, bind key i keylen value r, i, b)
+       else let k = first_key l in
+            match Compare.compare key off keylen k off keylen with
+            | Compare.Eq | Compare.Prefix -> T (tree, key, value)
+            | Compare.Contain -> B (bind key i keylen value l, r, i, b)
+            | Compare.Inf p ->
+               if p = i
+               then B (bind key i keylen value l, r, i, b)
+               else let bn = critbit (Key.get key p) (Key.get k p) in
+                    B (L (key, value), tree, p, bn)
+            | Compare.Sup p ->
+               if p = i
+               then B (l, bind key i keylen value r, i, b)
+               else let bn = critbit (Key.get key p) (Key.get k p) in
+                    B (tree, L (key, value), p, bn)
 
   let bind tree key value =
     match tree with
