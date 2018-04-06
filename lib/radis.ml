@@ -55,17 +55,18 @@ sig
 
   val empty: 'a t
   val is_empty: 'a t -> bool
-  val bind: 'a t -> key -> 'a -> 'a t
-  val lookup: 'a t -> key -> 'a option
-  val mem: 'a t -> key -> bool
-  val fold: (key * 'a -> 'b -> 'b) -> 'b -> 'a t -> 'b
-  val iter: (key * 'a -> unit) -> 'a t -> unit
+  val add: key -> 'a -> 'a t -> 'a t
+  val find: key -> 'a t -> 'a
+  val find_opt: key -> 'a t -> 'a option
+  val mem: key -> 'a t -> bool
+  val fold: (key -> 'a -> 'b -> 'b) -> 'b -> 'a t -> 'b
+  val iter: (key -> 'a -> unit) -> 'a t -> unit
   val to_sequence: 'a t -> (key * 'a) sequence
   val to_list: 'a t -> (key * 'a) list
-  val pp: (key * 'a) Fmt.t -> 'a t Fmt.t
+  val pp: key Fmt.t -> 'a Fmt.t -> 'a t Fmt.t
 end
 
-module Make (Key: KEY) =
+module Make (Key: KEY): S with type key = Key.t =
 struct
   type key = Key.t
 
@@ -133,8 +134,7 @@ struct
     | L (k, _) -> k
     | T (_, k, _) -> k
     | B (l, _, _, _) ->
-      first_key l (* XXX(dinosaure): could take the shortest path if
-                     [B] node embed he size of tree. *)
+       first_key l (* XXX(dinosaure): could be optimized to took the shortest path between [r] and [l]. *)
 
   let rec bind key off keylen value tree = match tree with
     | L (k, v) ->
@@ -187,12 +187,13 @@ struct
                else let bn = critbit (Key.get key p) (Key.get k p) in
                     B (tree, L (key, value), p, bn)
 
-  let bind tree key value =
-    match tree with
+  let bind key value = function
     | None -> Some (L (key, value))
     | Some tree ->
       let keylen = Key.length key in
       Some (bind key 0 keylen value tree)
+
+  let add = bind
 
   let rec lookup key off keylen tree = match tree with
     | L (k, v) ->
@@ -214,23 +215,27 @@ struct
          | Compare.Contain -> lookup key kl keylen m
          | Compare.Inf _ | Compare.Sup _ -> None
 
-
-  let lookup tree key =
-    match tree with
+  let lookup key = function
     | None -> None
     | Some tree ->
       let keylen = Key.length key in
       lookup key 0 keylen tree
 
-  let mem tree key =
-    match lookup tree key with
+  let find key tree = match lookup key tree with
+    | Some value -> value
+    | None -> raise Not_found
+
+  let find_opt = lookup
+
+  let mem key tree =
+    match lookup key tree with
     | None -> false
     | Some _ -> true
 
-  let rec fold f acc tree = match tree with
-    | L (k, v) -> f (k, v) acc
+  let rec fold f acc = function
+    | L (k, v) -> f k v acc
     | T (m, k, v) ->
-      let acc' = f (k, v) acc in
+      let acc' = f k v acc in
       fold f acc' m
     | B (l, r, _, _) ->
       let acc' = fold f acc l in
@@ -240,11 +245,10 @@ struct
     | None -> acc
     | Some tree -> fold f acc tree
 
-  let rec iter f tree = match tree with
-    | L (k, v) -> f (k, v)
-    | T (m, k, v) -> let () = f (k, v) in iter f m
-    | B (l, r, _, _) ->
-      let () = iter f l in iter f r
+  let rec iter f = function
+    | L (k, v) -> f k v
+    | T (m, k, v) -> f k v; iter f m
+    | B (l, r, _, _) -> iter f l; iter f r
 
   let iter f = function
     | None -> ()
@@ -252,10 +256,10 @@ struct
 
   let to_sequence
       : 'a t -> (Key.t * 'a) sequence
-      = fun tree k -> iter k tree
+      = fun tree f -> iter (fun k v -> f (k, v)) tree
 
-  let to_list t = fold (fun (k, v) acc -> (k, v) :: acc) [] t
+  let to_list t = fold (fun k v acc -> (k, v) :: acc) [] t
 
-  let pp ppv ppf radix =
-    Fmt.Dump.list ppv ppf (to_list radix)
+  let pp ppk ppv ppf radix =
+    Fmt.Dump.list (Fmt.Dump.pair ppk ppv) ppf (to_list radix)
 end

@@ -38,7 +38,7 @@ let take lst n =
 
 let objects_10 = take objects 10
 
-let radix lst = List.fold_left (fun map (k, v) -> Radix.bind map k v) Radix.empty lst
+let radix lst = List.fold_left (fun map (k, v) -> Radix.add k v map) Radix.empty lst
 let map lst = List.fold_left (fun map (k, v) -> Map.add k v map) Map.empty lst
 let hashtbl ?(size = 128) lst =
   let hashtbl = Hashtbl.create size in
@@ -64,7 +64,7 @@ let bench_lookup_one ?(time = 3) ?(repeat = 3) key n =
   let r = radix lst in
   let m = map lst in
   let h = hashtbl lst in
-  let radix ()   = ignore @@ Radix.lookup r key in
+  let radix ()   = ignore @@ Radix.find_opt key r in
   let map ()     = ignore @@ Map.find_opt key m in
   let hashtbl () = ignore @@ Hashtbl.find_opt h key in
   Benchmark.throughputN time ~repeat
@@ -78,7 +78,7 @@ let bench_lookup_all ?(time = 3) ?(repeat = 3) n =
   let r = radix lst in
   let m = map lst in
   let h = hashtbl lst in
-  let radix   () = List.iter (fun k -> ignore @@ Radix.lookup r k) key in
+  let radix   () = List.iter (fun k -> ignore @@ Radix.find_opt k r) key in
   let map     () = List.iter (fun k -> ignore @@ Map.find_opt k m) key in
   let hashtbl () = List.iter (fun k -> ignore @@ Hashtbl.find_opt h k) key in
   Benchmark.throughputN time ~repeat
@@ -90,7 +90,7 @@ let bench_mem_one ?(time = 3) ?(repeat = 3) (n, key) =
   let lst = take objects n in
   let r = radix lst in
   let m = map lst in
-  let radix () = ignore @@ Radix.mem r key in
+  let radix () = ignore @@ Radix.mem key r in
   let map   () = ignore @@ Map.mem key m in
   Benchmark.throughputN time ~repeat
     [ "radix", radix, ()
@@ -100,18 +100,19 @@ let app_int f n = Benchmark.Tree.(string_of_int n @> lazy (f n))
 
 let () =
   let open Benchmark.Tree in
+  let repeat, time = 3, 5 in
   register
     ("radis" @>>>
        [ "add" @>>
            concat
-             [ app_int (bench_add ~repeat:3 ~time:2) 10
-             ; app_int (bench_add ~repeat:3 ~time:2) 100
-             ; app_int (bench_add ~repeat:3 ~time:2) 1000 ]
+             [ app_int (bench_add ~repeat ~time) 10
+             ; app_int (bench_add ~repeat ~time) 100
+             ; app_int (bench_add ~repeat ~time) 1000 ]
        ; "lookup_all" @>>
            concat
-             [ app_int (bench_lookup_all ~repeat:3 ~time:2) 10
-             ; app_int (bench_lookup_all ~repeat:3 ~time:2) 100
-             ; app_int (bench_lookup_all ~repeat:3 ~time:2) 1000 ] ])
+             [ app_int (bench_lookup_all ~repeat ~time) 10
+             ; app_int (bench_lookup_all ~repeat ~time) 100
+             ; app_int (bench_lookup_all ~repeat ~time) 1000 ] ])
 
 let () =
   try Benchmark.Tree.run_global ()

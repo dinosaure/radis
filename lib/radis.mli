@@ -45,24 +45,26 @@ sig
   val is_empty: 'a t -> bool
   (** Test whether is radix-tree is empty or not. *)
 
-  val bind: 'a t -> key -> 'a -> 'a t
+  val add: key -> 'a -> 'a t -> 'a t
   (** [bind t k v] returns a radix-tree containing the same binding as
       [t], plus a binding [k] to [v]. *)
 
-  val lookup: 'a t -> key -> 'a option
+  val find: key -> 'a t -> 'a
+
+  val find_opt: key -> 'a t -> 'a option
   (** [lookup t k] returns the current binding of [k] in [t] or
       returns [None] if no such binding exists. *)
 
-  val mem: 'a t -> key -> bool
+  val mem: key -> 'a t -> bool
   (** [mem t k] checks if at least we have one binding with the key
       [k]. *)
 
-  val fold: (key * 'a -> 'b -> 'b) -> 'b -> 'a t -> 'b
+  val fold: (key -> 'a -> 'b -> 'b) -> 'b -> 'a t -> 'b
   (** [fold f a t] computes [(f kN dN (f k1 d1 a))], where [k1 .. kN]
       are the keys of all bindings in [t], and [d1 .. dN] are the
       associated data. *)
 
-  val iter: (key * 'a -> unit) -> 'a t -> unit
+  val iter: (key -> 'a -> unit) -> 'a t -> unit
   (** [iter f t] applies [f] to all bindings in radix-tree [t]. [f]
       receives a pair which contains the key and the associated
       value. *)
@@ -74,7 +76,7 @@ sig
   val to_list: 'a t -> (key * 'a) list
   (** [to_list t] makes an associated list from the radix-tree. *)
 
-  val pp: (key * 'a) Fmt.t -> 'a t Fmt.t
+  val pp: key Fmt.t -> 'a Fmt.t -> 'a t Fmt.t
   (** A pretty-printer for the radix-tree. *)
 end
 
