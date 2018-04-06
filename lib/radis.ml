@@ -56,6 +56,7 @@ sig
   val empty: 'a t
   val is_empty: 'a t -> bool
   val add: key -> 'a -> 'a t -> 'a t
+  val remove: key -> 'a t -> 'a t
   val find: key -> 'a t -> 'a
   val find_opt: key -> 'a t -> 'a option
   val mem: key -> 'a t -> bool
@@ -214,6 +215,38 @@ struct
          | Compare.Eq | Compare.Prefix -> Some v
          | Compare.Contain -> lookup key kl keylen m
          | Compare.Inf _ | Compare.Sup _ -> None
+
+  exception Empty
+
+  let rec remove key off keylen tree = match tree with
+    | L (k, _) ->
+       if Key.equal key k then raise Empty else tree
+    | B (l, r, i, b) ->
+       if keylen > i
+       then let dir, ndir =
+              if ((Char.code (Key.get key i)) land (1 lsl b)) = 0
+              then l, r else r, l in
+            try remove key i keylen dir
+            with Empty -> ndir
+       else tree (* does not exists *)
+    | T (m, k, v) ->
+       if Key.equal k key
+       then m
+       else
+         let kl = Key.length k in
+         match Compare.compare key off keylen k off kl with
+         | Compare.Eq | Compare.Prefix -> m
+         | Compare.Contain ->
+            (try remove key kl keylen m
+             with Empty -> L (k, v))
+         | Compare.Inf _ | Compare.Sup _ -> tree (* does not exists *)
+
+  let remove key = function
+    | None -> None
+    | Some tree ->
+       let keylen = Key.length key in
+       try Some (remove key 0 keylen tree)
+       with Empty -> None
 
   let lookup key = function
     | None -> None

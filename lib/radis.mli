@@ -49,6 +49,8 @@ sig
   (** [bind t k v] returns a radix-tree containing the same binding as
       [t], plus a binding [k] to [v]. *)
 
+  val remove: key -> 'a t -> 'a t
+
   val find: key -> 'a t -> 'a
 
   val find_opt: key -> 'a t -> 'a option
