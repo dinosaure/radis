@@ -45,5 +45,10 @@ This library, as I said on the header, is a mix between ocaml-stringset and
 ocaml-aliases. The license story and improvements on each library (and
 abondonment of certain) is not clear to decide which license we should use.
 
-So, I _re_-licensed this library under MIT (like others of my libraries) and
-prepare a beer-pot to Hugo if he wants royalties.
+So, I continue to use LGPL 2.1 (as mentionned on ocaml-aliases) and find the
+_path_-inspiration (available on AUTHORS.md):
+- Jean-Christophe Filliatre (Patricia tree)
+- Ludo (@khigia) (extend to use a string as a key)
+- Hugo Heuzard (bind to a list of values)
+- Romain Calascibetta (computation of the critical bit - as the first
+  improvement)
