@@ -28,21 +28,18 @@ type 'a sequence = ('a -> unit) -> unit
 
 module type S =
 sig
-  type key
-  type 'a t
+  include Map.S
 
-  val empty: 'a t
-  val is_empty: 'a t -> bool
-  val add: key -> 'a -> 'a t -> 'a t
-  val remove: key -> 'a t -> 'a t
-  val find: key -> 'a t -> 'a
-  val find_opt: key -> 'a t -> 'a option
-  val mem: key -> 'a t -> bool
-  val fold: (key -> 'a -> 'b -> 'b) -> 'b -> 'a t -> 'b
-  val iter: (key -> 'a -> unit) -> 'a t -> unit
   val to_sequence: 'a t -> (key * 'a) sequence
-  val to_list: 'a t -> (key * 'a) list
   val pp: key Fmt.t -> 'a Fmt.t -> 'a t Fmt.t
+end
+
+module Option =
+struct
+  let bind f = function Some v -> f v | None -> None
+  let map f = function Some v -> Some (f v) | None -> None
+  let (>>=) v f = bind f v
+  let (>|=) v f = map f v
 end
 
 module Make (Key: KEY): S with type key = Key.t =
@@ -109,11 +106,25 @@ struct
     | None -> true
     | Some _ -> false
 
+  let singleton k v = Some (L (k, v))
+
+  let rec choose = function
+    | L (k, v) -> (k, v)
+    | T (_, k, v) -> (k, v)
+    | B (l, _, _, _) -> choose l
+
+  let choose_opt t = let open Option in t >|= choose
+
+  let choose = function
+    | None -> raise Not_found
+    | Some tree -> choose tree
+
   let rec first_key = function
     | L (k, _) -> k
     | T (_, k, _) -> k
     | B (l, _, _, _) ->
-       first_key l (* XXX(dinosaure): could be optimized to took the shortest path between [r] and [l]. *)
+      first_key l (* XXX(dinosaure): could be optimized to took the shortest
+                     path between [r] and [l]. *)
 
   let rec bind key off keylen value tree = match tree with
     | L (k, v) ->
@@ -194,6 +205,44 @@ struct
          | Compare.Contain -> lookup key kl keylen m
          | Compare.Inf _ | Compare.Sup _ -> None
 
+  let rec find_first_opt f = function
+    | L (k, v) -> if f k then Some (k, v) else None
+    | T (m, k, v) ->
+      if f k then Some (k, v) else find_first_opt f m
+    | B (l, r, _, _) ->
+      match find_first_opt f l, find_first_opt f r with
+      | Some (lk, lv), Some (rk, rv) ->
+        (match Compare.compare lk 0 (Key.length lk) rk 0 (Key.length rk) with
+         | Compare.Inf _ | Compare.Prefix -> Some (lk, lv)
+         | _ -> Some (rk, rv))
+      | Some v, None -> Some v
+      | None, Some v -> Some v
+      | None, None -> None
+
+  let find_first_opt f t = let open Option in t >>= find_first_opt f
+  let find_first f t = match find_first_opt f t with
+    | Some v -> v
+    | None -> raise Not_found
+
+  let rec find_last_opt f = function
+    | L (k, v) -> if f k then Some (k, v) else None
+    | T (m, k, v) ->
+      if f k then Some (k, v) else find_last_opt f m
+    | B (l, r, _, _) ->
+      match find_last_opt f l, find_last_opt f r with
+      | Some (lk, lv), Some (rk, rv) ->
+        (match Compare.compare lk 0 (Key.length lk) rk 0 (Key.length rk) with
+         | Compare.Sup _ | Compare.Contain -> Some (lk, lv)
+         | _ -> Some (rk, rv))
+      | Some v, None -> Some v
+      | None, Some v -> Some v
+      | None, None -> None
+
+  let find_last_opt f t = let open Option in t >>= find_last_opt f
+  let find_last f t = match find_last_opt f t with
+    | Some v -> v
+    | None -> raise Not_found
+
   exception Empty
 
   let rec remove key off keylen tree = match tree with
@@ -256,6 +305,22 @@ struct
     | None -> acc
     | Some tree -> fold f acc tree
 
+  let cardinal m = fold (fun _key _value -> (+) 1) 0 m
+  let for_all f = fold (fun k v -> (&&) (f k v)) true
+  let exists f = fold (fun k v -> (||) (f k v)) true
+
+  let rec map f = function
+    | L (k, v) -> L (k, f k v)
+    | T (m, k, v) -> T (map f m, k, f k v)
+    | B (l, r, i, b) ->
+      B (map f l, map f r, i, b)
+
+  let mapi f = function
+    | None -> None
+    | Some tree -> Some (map f tree)
+
+  let map f = mapi (fun _ v -> f v)
+
   let rec iter f = function
     | L (k, v) -> f k v
     | T (m, k, v) -> f k v; iter f m
@@ -269,8 +334,106 @@ struct
       : 'a t -> (Key.t * 'a) sequence
       = fun tree f -> iter (fun k v -> f (k, v)) tree
 
-  let to_list t = fold (fun k v acc -> (k, v) :: acc) [] t
+  let bindings t = fold (fun k v a -> (k, v) :: a) [] t
+  let filter f = fold (fun k v a -> if f k v then add k v a else a) empty
+
+  let equal (type a) (f: a -> a -> bool) (a: a t) (b: a t) =
+    try List.for_all2 (fun (k1, v1) (k2, v2) -> match Compare.compare k1 0 (Key.length k1) k2 0 (Key.length k2) with
+        | Compare.Eq -> f v1 v2
+        | _ -> false) (bindings a) (bindings b)
+    with _exn -> false
+
+  let partition f t =
+    fold (fun k v (a, b) -> if f k v then (add k v a, b) else (a, add k v b)) (empty, empty) t
+
+  let split key =
+    let keylen = Key.length key in
+    let coll k v (l, b, r) =
+      let kl = Key.length k in
+
+      match Compare.compare key 0 keylen k 0 kl with
+      | Compare.Eq -> l, Some v, r
+      | Compare.Inf _ -> add k v l, b, r
+      | Compare.Sup _ -> l, b, add k v r
+      | Compare.Prefix -> add k v l, b, r
+      | Compare.Contain -> l, b, add k v r in
+    fold coll (empty, None, empty)
+
+  let rec min_binding = function
+    | L (k, v) -> (k, v)
+    | B (l, _, _, _) -> min_binding l
+    | T (_, k, v) -> (k, v)
+
+  let min_binding_opt t = let open Option in t >|= min_binding
+  let min_binding t = match min_binding_opt t with
+    | Some v -> v
+    | None -> raise Not_found
+
+  let rec max_binding = function
+    | L (k, v) -> (k, v)
+    | B (_, r, _, _) -> max_binding r
+    | T (m, _, _) -> max_binding m
+
+  let max_binding_opt t = let open Option in t >|= max_binding
+  let max_binding t = match max_binding_opt t with
+    | Some v -> v
+    | None -> raise Not_found
+
+  let merge f a b =
+    let add m k = function None -> m | Some v -> add k v m in
+    let m = fold (fun k1 v1 m -> add m k1 (f k1 (Some v1) (find_opt k1 b))) empty a in
+    fold (fun k2 v2 m -> if mem k2 a then m else add m k2 (f k2 None (Some v2))) m b
+
+  let union f a b =
+    let m =
+      fold (fun k v m ->
+          match find_opt k b with
+          | None -> add k v m
+          | Some w ->
+            match f k v w with
+            | None -> m
+            | Some z -> add k z m)
+        a empty in
+    fold (fun k v m ->
+        match find_opt k a with
+        | None -> add k v m
+        | Some _ -> m) b m
+
+  let compare cmp a b =
+    let rec go a b = match a, b with
+      | L (k1, v1), L (k2, v2) ->
+        (match Compare.compare k1 0 (Key.length k1) k2 0 (Key.length k2) with
+         | Compare.Eq -> cmp v1 v2
+         | Compare.Inf _ | Compare.Prefix -> (-1)
+         | Compare.Sup _ | Compare.Contain -> 1)
+      | L _, T _ | L _, B _ -> (-1)
+      | T (m, k1, v1), T (n, k2, v2) ->
+        (match Compare.compare k1 0 (Key.length k1) k2 0 (Key.length k2) with
+         | Compare.Eq -> let c = cmp v1 v2 in if c <> 0 then c else go m n
+         | Compare.Inf _ | Compare.Prefix -> (-1)
+         | Compare.Sup _ | Compare.Contain -> 1)
+      | T _, L _ -> 1
+      | T _, B _ -> (-1)
+      | B (l1, r1, i1, b1), B (l2, r2, i2, b2) ->
+        let c = i1 - i2 in
+        if c <> 0
+        then c else
+          let c = b1 - b2 in
+          if c <> 0 then c
+          else let c = go l1 l2 in
+            if c <> 0
+            then c else go r1 r2
+      | B _, L _ | B _, T _ -> 1
+    in go a b
+
+  let compare cmp a b = match a, b with
+    | Some a, Some b -> compare cmp a b
+    | Some _, None -> 1
+    | None, Some _ -> (-1)
+    | None, None -> 0
 
   let pp ppk ppv ppf radix =
-    Fmt.Dump.list (Fmt.Dump.pair ppk ppv) ppf (to_list radix)
+    Fmt.Dump.list (Fmt.Dump.pair ppk ppv) ppf (bindings radix)
+
+  let fold f m a = fold f a m
 end
