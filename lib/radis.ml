@@ -55,24 +55,40 @@ struct
       | Inf of int
       | Sup of int
 
-    let rec compare
-      : key -> int -> int -> key -> int -> int -> t
-      = fun value1 off1 len1 value2 off2 len2 ->
-      if off1 = len1
-      then if off2 = len2
-          then Eq
-          else Prefix
-      else if off2 = len2
-          then Contain
-          else
-            let c1 = Key.get value1 off1 in
-            let c2 = Key.get value2 off2 in
+    let unsafe_code s i : int = Obj.magic (Key.get s i)
+    exception Break
 
-            if Char.code c1 - Char.code c2 = 0
-            then compare value1 (off1 + 1) len1 value2 (off2 + 1) len2
-            else if c1 < c2
-            then Inf off1
-            else (* c1 > c2 *) Sup off1
+    let fast_diff a b off len =
+      if off = len then Eq
+      else
+        let i = ref off in
+        let c1 = ref (unsafe_code a off) in
+        let c2 = ref (unsafe_code b off) in
+
+        try
+          if !c1 <> !c2 then raise Break;
+          incr i;
+
+          while !i < len
+          do
+            c1 := unsafe_code a !i;
+            c2 := unsafe_code b !i;
+
+            if !c1 <> !c2 then raise Break else incr i done;
+          Eq
+        with Break -> if !c1 < !c2 then Inf !i else Sup !i
+
+    let fast_diff a b off lena lenb =
+      if lena = lenb
+      then fast_diff a b off lena (* = lenb *)
+      else
+      if lena < lenb
+      then match fast_diff a b off lena with
+        | Eq -> Prefix | v -> v
+      else match fast_diff a b off lenb with
+        | Eq -> Contain | v -> v
+
+    let compare = fast_diff
   end
 
   let table =
@@ -128,11 +144,8 @@ struct
 
   let rec bind key off keylen value tree = match tree with
     | L (k, v) ->
-       if Key.equal key k
-       then L (k, value)
-       else
          (let kl = Key.length k in
-          match Compare.compare key off keylen k off kl with
+          match Compare.compare key k off keylen kl with
           | Compare.Eq -> L (k, value) (* replace *)
           | Compare.Prefix -> T (tree, key, value)
           | Compare.Contain -> T (L (key, value), k, v)
@@ -143,11 +156,8 @@ struct
              let b = critbit (Key.get key p) (Key.get k p) in
              B (tree, L (key, value), p, b))
     | T (m, k, v) ->
-       if Key.equal key k
-       then T (m, k, value)
-       else
          (let kl = Key.length k in
-          match Compare.compare key off keylen k off kl with
+          match Compare.compare key k off keylen kl with
           | Compare.Eq -> T (m, k, value) (* replace *)
           | Compare.Prefix -> T (tree, key, value)
           | Compare.Contain -> T (bind key kl keylen value m, k, v)
@@ -163,7 +173,7 @@ struct
             then B (bind key i keylen value l, r, i, b)
             else B (l, bind key i keylen value r, i, b)
        else let k = first_key l in
-            match Compare.compare key off keylen k off keylen with
+            match Compare.compare key k off keylen keylen with
             | Compare.Eq | Compare.Prefix -> T (tree, key, value)
             | Compare.Contain -> B (bind key i keylen value l, r, i, b)
             | Compare.Inf p ->
@@ -200,7 +210,7 @@ struct
        then Some v
        else
          let kl = Key.length k in
-         match Compare.compare key off keylen k off kl with
+         match Compare.compare key k off keylen kl with
          | Compare.Eq | Compare.Prefix -> Some v
          | Compare.Contain -> lookup key kl keylen m
          | Compare.Inf _ | Compare.Sup _ -> None
@@ -212,7 +222,7 @@ struct
     | B (l, r, _, _) ->
       match find_first_opt f l, find_first_opt f r with
       | Some (lk, lv), Some (rk, rv) ->
-        (match Compare.compare lk 0 (Key.length lk) rk 0 (Key.length rk) with
+        (match Compare.compare lk rk 0 (Key.length lk) (Key.length rk) with
          | Compare.Inf _ | Compare.Prefix -> Some (lk, lv)
          | _ -> Some (rk, rv))
       | Some v, None -> Some v
@@ -231,7 +241,7 @@ struct
     | B (l, r, _, _) ->
       match find_last_opt f l, find_last_opt f r with
       | Some (lk, lv), Some (rk, rv) ->
-        (match Compare.compare lk 0 (Key.length lk) rk 0 (Key.length rk) with
+        (match Compare.compare lk rk 0 (Key.length lk) (Key.length rk) with
          | Compare.Sup _ | Compare.Contain -> Some (lk, lv)
          | _ -> Some (rk, rv))
       | Some v, None -> Some v
@@ -261,7 +271,7 @@ struct
        then m
        else
          let kl = Key.length k in
-         match Compare.compare key off keylen k off kl with
+         match Compare.compare key k off keylen kl with
          | Compare.Eq | Compare.Prefix -> m
          | Compare.Contain ->
             (try remove key kl keylen m
@@ -338,7 +348,7 @@ struct
   let filter f = fold (fun k v a -> if f k v then add k v a else a) empty
 
   let equal (type a) (f: a -> a -> bool) (a: a t) (b: a t) =
-    try List.for_all2 (fun (k1, v1) (k2, v2) -> match Compare.compare k1 0 (Key.length k1) k2 0 (Key.length k2) with
+    try List.for_all2 (fun (k1, v1) (k2, v2) -> match Compare.compare k1 k2 0 (Key.length k1) (Key.length k2) with
         | Compare.Eq -> f v1 v2
         | _ -> false) (bindings a) (bindings b)
     with _exn -> false
@@ -351,7 +361,7 @@ struct
     let coll k v (l, b, r) =
       let kl = Key.length k in
 
-      match Compare.compare key 0 keylen k 0 kl with
+      match Compare.compare key k 0 keylen kl with
       | Compare.Eq -> l, Some v, r
       | Compare.Inf _ -> add k v l, b, r
       | Compare.Sup _ -> l, b, add k v r
@@ -402,13 +412,13 @@ struct
   let compare cmp a b =
     let rec go a b = match a, b with
       | L (k1, v1), L (k2, v2) ->
-        (match Compare.compare k1 0 (Key.length k1) k2 0 (Key.length k2) with
+        (match Compare.compare k1 k2 0 (Key.length k1) (Key.length k2) with
          | Compare.Eq -> cmp v1 v2
          | Compare.Inf _ | Compare.Prefix -> (-1)
          | Compare.Sup _ | Compare.Contain -> 1)
       | L _, T _ | L _, B _ -> (-1)
       | T (m, k1, v1), T (n, k2, v2) ->
-        (match Compare.compare k1 0 (Key.length k1) k2 0 (Key.length k2) with
+        (match Compare.compare k1 k2 0 (Key.length k1) (Key.length k2) with
          | Compare.Eq -> let c = cmp v1 v2 in if c <> 0 then c else go m n
          | Compare.Inf _ | Compare.Prefix -> (-1)
          | Compare.Sup _ | Compare.Contain -> 1)
