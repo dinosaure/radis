@@ -26,7 +26,7 @@ let test_add ~keylen =
   Alcotest.test_case "add" `Quick
     (fun () ->
       Random.init seed;
-        for i = 0 to 999
+        for _ = 0 to 999
         do let key = random_string keylen in
            if not (Radix.mem key radix) then raise Not_found done)
 
