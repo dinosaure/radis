@@ -4,21 +4,21 @@ Radis
 Radis is a little library to provide an implementation of a Radix tree
 (specialized with a scalar key - like a string, bigarray or array). This project
 is a part of ocaml-git to have a fast access to an immutable store. In this way,
-remove operation does not exist and this data-structure is focused on lookup
-operation when the key is specifically a hash (see
+remove operation should be the slowest operation and this data-structure is
+focused on lookup operation when the key is specifically a hash (see
 [digestif](https://github.com/mirage/digestif)).
 
 The idea behind this library is to provide a fast access to an immutable store
 (like git). So, in my mind, if we put a new object in this store, it can not be
-deleted. It's why remove operation does not exists - of course, in a git store,
+deleted. It's why remove operation should be slow - of course, in a git store,
 it's possible to delete an useless object (see `git gc`), however this
 computation does not appear in this way.
 
 Examples
 ========
 
-This library is close to provide a Map like what stdlib provide (again, without
-remove operation). Then, you have differents accessors (iter, fold, find).
+This library is close to provide a Map like what stdlib provide: `Map.S` since
+ocaml 4.06.0.
 
 Benchmarks & Performance
 ========================
@@ -34,9 +34,17 @@ data-structure and look how long we need to access (`lookup` operation) to a
 value.
 
 This benchmark was run on my computer (Thinkpad X1 Carbon - Intel i7-7500U CPU @
-2.70 Ghz - 2.90 Ghz). You can run benchmarks with `./bench -p radis`. If you
+2.70 Ghz - 2.90 Ghz). You can run benchmarks with `./macro -p radis`. If you
 catch an exception, it's because you don't have enough git objects on your
 current directory. Results are available on `benchmarks.txt`.
+
+We implemented a benchmark with `Core_bench` (available by `jbuilder build
+bench/micro.exe`). Results are the same than `Benchmarks` (`macro`):
+
+- `Map` from stdlib is slower than `Radis` when we have more than 100 elements
+- `Hashtbl` is faster
+
+This is expected goal and could be improve for next release.
 
 Inspirations & License
 ======================
