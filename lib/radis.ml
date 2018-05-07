@@ -446,4 +446,9 @@ struct
     Fmt.Dump.list (Fmt.Dump.pair ppk ppv) ppf (bindings radix)
 
   let fold f m a = fold f a m
+
+  let update x f m =
+    match f (find_opt x m) with
+    | Some z -> add x z m
+    | None -> remove x m
 end
