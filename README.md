@@ -1,5 +1,5 @@
-Radis
-=====
+Radis - Radix tree implementation
+=================================
 
 Radis is a little library to provide an implementation of a Radix tree
 (specialized with a scalar key - like a string, bigarray or array). This project
@@ -14,14 +14,12 @@ deleted. It's why remove operation should be slow - of course, in a git store,
 it's possible to delete an useless object (see `git gc`), however this
 computation does not appear in this way.
 
-Examples
-========
+## Examples
 
 This library is close to provide a Map like what stdlib provide: `Map.S` since
 ocaml 4.06.0.
 
-Benchmarks & Performance
-========================
+## Benchmarks & Performance
 
 From the initial purpose, the `lookup` operation must be fast. So we did a
 benchmark between Radis, Map (from stdlib) and Hashtbl. About the benchmark, we
@@ -46,8 +44,7 @@ bench/micro.exe`). Results are the same than `Benchmarks` (`macro`):
 
 This is expected goal and could be improve for next release.
 
-Inspirations & License
-======================
+## Inspirations & License
 
 This library, as I said on the header, is a mix between ocaml-stringset and
 ocaml-aliases. The license story and improvements on each library (and
