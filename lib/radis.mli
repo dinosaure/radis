@@ -26,18 +26,11 @@ sig
   val length: t -> int
 end
 
-(** A concrete iterable structure. *)
-type 'a sequence = ('a -> unit) -> unit
-
 (** A Radix tree is a optimized container to bind a [Key.t] with a
     value. *)
 module type S =
 sig
   include Map.S
-
-  val to_sequence: 'a t -> (key * 'a) sequence
-  (** [to_sequence t] makes a abstract representation o the
-      radix-tree. *)
 
   val pp: key Fmt.t -> 'a Fmt.t -> 'a t Fmt.t
   (** A pretty-printer for the radix-tree. *)

@@ -24,13 +24,10 @@ sig
   val length: t -> int
 end
 
-type 'a sequence = ('a -> unit) -> unit
-
 module type S =
 sig
   include Map.S
 
-  val to_sequence: 'a t -> (key * 'a) sequence
   val pp: key Fmt.t -> 'a Fmt.t -> 'a t Fmt.t
 end
 
@@ -46,6 +43,8 @@ module Make (Key: KEY): S with type key = Key.t =
 struct
   type key = Key.t
 
+  (* XXX(dinosaure): [Char.code = "%identity"]. *)
+
   module Compare =
   struct
     type t =
@@ -55,31 +54,31 @@ struct
       | Inf of int
       | Sup of int
 
-    let unsafe_code s i : int = Obj.magic (Key.get s i)
+    let code s i = Char.code (Key.get s i)
     exception Break
 
     let fast_diff a b off len =
-      if off = len then Eq
+      if off == len then Eq
       else
         let i = ref off in
-        let c1 = ref (unsafe_code a off) in
-        let c2 = ref (unsafe_code b off) in
+        let c1 = ref (code a off) in
+        let c2 = ref (code b off) in
 
         try
-          if !c1 <> !c2 then raise Break;
+          if !c1 != !c2 then raise Break;
           incr i;
 
           while !i < len
           do
-            c1 := unsafe_code a !i;
-            c2 := unsafe_code b !i;
+            c1 := code a !i;
+            c2 := code b !i;
 
-            if !c1 <> !c2 then raise Break else incr i done;
+            if !c1 != !c2 then raise Break else incr i done;
           Eq
         with Break -> if !c1 < !c2 then Inf !i else Sup !i
 
     let fast_diff a b off lena lenb =
-      if lena = lenb
+      if lena == lenb
       then fast_diff a b off lena (* = lenb *)
       else
       if lena < lenb
@@ -90,6 +89,45 @@ struct
 
     let compare = fast_diff
   end
+
+  module InlinedCompare =
+  struct
+    type t = EqOrPrefix | Contain | InfOrSup
+
+    let code s i = Char.code (Key.get s i)
+    exception Break
+
+    let fast_diff a b off len =
+      if off == len then EqOrPrefix
+      else
+        let i = ref off in
+        let c1 = ref (code a off) in
+        let c2 = ref (code b off) in
+
+        try
+          if !c1 != !c2 then raise Break;
+          incr i;
+
+          while !i < len
+          do
+            c1 := code a !i;
+            c2 := code b !i;
+
+            if !c1 != !c2 then raise Break else incr i done;
+          EqOrPrefix
+        with Break -> InfOrSup
+
+    let fast_diff a b off lena lenb =
+      if lena == lenb
+      then fast_diff a b off lena
+      else if lena < lenb
+      then fast_diff a b off lena
+      else match fast_diff a b off lenb with
+        | EqOrPrefix -> Contain | v -> v
+
+    let compare = fast_diff
+  end
+
 
   let table =
     [| 0;1;2;2;3;3;3;3;4;4;4;4;4;4;4;4;5;5;5;5;5;5;5;5;5;5;5;5;5;5;5;5;
@@ -104,7 +142,7 @@ struct
   let ffs byte = Array.unsafe_get table byte
 
   let critbit c1 c2 =
-    if c1 = c2
+    if c1 == c2 (* XXX(dinosaure): (==) faster than (=) on __unboxed__ values. *)
     then raise Not_found
     else ffs ((Char.code c1) lxor (Char.code c2)) - 1
 
@@ -114,7 +152,6 @@ struct
     | B of 'a node * 'a node * int * int
 
   type 'a t = 'a node option
-  type nonrec 'a sequence = 'a sequence
 
   let empty = None
 
@@ -195,25 +232,27 @@ struct
 
   let add = bind
 
-  let rec lookup key off keylen tree = match tree with
+  let rec lookup key off keylen = function
     | L (k, v) ->
-       if Key.equal key k then Some v else None
+       if Key.equal key k then v else raise Not_found
     | B (l, r, i, b) ->
        if keylen > i
-       then let dir =
-              if ((Char.code (Key.get key i)) land (1 lsl b)) = 0
-              then l else r in
-            lookup key i keylen dir
-       else None
+       then
+         if ((Char.code (Key.get key i)) land (1 lsl b)) == 0
+         then lookup key i keylen l else lookup key i keylen r
+       else raise Not_found
     | T (m, k, v) ->
        if Key.equal k key
-       then Some v
+       then v
        else
-         let kl = Key.length k in
-         match Compare.compare key k off keylen kl with
-         | Compare.Eq | Compare.Prefix -> Some v
-         | Compare.Contain -> lookup key kl keylen m
-         | Compare.Inf _ | Compare.Sup _ -> None
+         match InlinedCompare.compare key k off keylen (Key.length k) with
+         | InlinedCompare.EqOrPrefix -> v
+         | InlinedCompare.Contain -> lookup key (Key.length k) keylen m
+         | InlinedCompare.InfOrSup -> raise Not_found
+
+  let lookup_opt key off keylen tree =
+    try Some (lookup key off keylen tree)
+    with Not_found -> None
 
   let rec find_first_opt f = function
     | L (k, v) -> if f k then Some (k, v) else None
@@ -271,12 +310,12 @@ struct
        then m
        else
          let kl = Key.length k in
-         match Compare.compare key k off keylen kl with
-         | Compare.Eq | Compare.Prefix -> m
-         | Compare.Contain ->
+         match InlinedCompare.compare key k off keylen kl with
+         | InlinedCompare.EqOrPrefix -> m
+         | InlinedCompare.Contain ->
             (try remove key kl keylen m
              with Empty -> L (k, v))
-         | Compare.Inf _ | Compare.Sup _ -> tree (* does not exists *)
+         | InlinedCompare.InfOrSup -> tree (* does not exists *)
 
   let remove key = function
     | None -> None
@@ -286,21 +325,24 @@ struct
        with Empty -> None
 
   let lookup key = function
-    | None -> None
+    | None -> raise Not_found
     | Some tree ->
       let keylen = Key.length key in
       lookup key 0 keylen tree
 
-  let find key tree = match lookup key tree with
-    | Some value -> value
-    | None -> raise Not_found
+  let lookup_opt key = function
+    | None -> None
+    | Some tree ->
+      let keylen = Key.length key in
+      lookup_opt key 0 keylen tree
 
-  let find_opt = lookup
+  let find key tree = lookup key tree
+
+  let find_opt = lookup_opt
 
   let mem key tree =
-    match lookup key tree with
-    | None -> false
-    | Some _ -> true
+    try ignore @@ lookup key tree; true
+    with Not_found -> false
 
   let rec fold f acc = function
     | L (k, v) -> f k v acc
@@ -339,10 +381,6 @@ struct
   let iter f = function
     | None -> ()
     | Some tree -> iter f tree
-
-  let to_sequence
-      : 'a t -> (Key.t * 'a) sequence
-      = fun tree f -> iter (fun k v -> f (k, v)) tree
 
   let bindings t = fold (fun k v a -> (k, v) :: a) [] t
   let filter f = fold (fun k v a -> if f k v then add k v a else a) empty
@@ -451,4 +489,42 @@ struct
     match f (find_opt x m) with
     | Some z -> add x z m
     | None -> remove x m
+
+  type 'a enum = End | More of key * 'a * 'a t * 'a enum
+
+  let rec cons_enum t e = match t with
+    | None -> e
+    | Some (L (k, v)) -> cons_enum None (More (k, v, None, e))
+    | Some (T (t, k, v)) -> cons_enum (Some t) (More (k, v, None, e))
+    | Some (B (l, r, _, _)) -> cons_enum (Some l) (cons_enum (Some r) End)
+
+  let rec seq_of_enum c () = match c with
+    | End -> Seq.Nil
+    | More (k, v, t, rest) -> Seq.Cons ((k, v), seq_of_enum (cons_enum t rest))
+
+  let to_seq t = seq_of_enum (cons_enum t End)
+  let add_seq seq t = Seq.fold_left (fun t (k, v) -> add k v t) t seq
+  let of_seq seq = add_seq seq empty
+
+  let to_seq_from low m =
+    let rec aux low off keylen m c = match m with
+      | None -> c
+      | Some (L (k, v)) ->
+        if Key.equal low k
+        then More (k, v, None, c)
+        else c
+      | Some (B (l, r, i, b)) ->
+        if keylen > i then
+          if ((Char.code (Key.get low i)) land (1 lsl b)) == 0
+          then aux low i keylen (Some l) c
+          else aux low i keylen (Some r) c
+        else c
+      | Some (T (t, k, v)) ->
+        if Key.equal low k
+        then aux low off keylen (Some t) (More (k, v, None, c))
+        else match InlinedCompare.compare low k off keylen (Key.length k) with
+          | InlinedCompare.EqOrPrefix -> aux low (Key.length k) keylen (Some t) (More (k, v, None, c))
+          | InlinedCompare.Contain -> aux low (Key.length k) keylen (Some t) (More (k, v, None, c))
+          | InlinedCompare.InfOrSup -> c in
+    seq_of_enum (aux low 0 (Key.length low) m End)
 end
