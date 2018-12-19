@@ -17,6 +17,7 @@ build-test: [["jbuilder" "runtest" "-p" name "-j" jobs]]
 depends: [
   "jbuilder" {build & >="1.0+beta9"}
   "fmt"
+  "seq"
   "alcotest" {test}
 ]
 
