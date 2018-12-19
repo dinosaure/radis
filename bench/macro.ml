@@ -1,6 +1,14 @@
-module SHA1 = Digestif.SHA1.Bytes
-module Radix = Radis.Make(struct type t = Bytes.t let get = Bytes.unsafe_get let length _ = Digestif.SHA1.digest_size let equal = Digestif.SHA1.Bytes.eq end)
-module Map = Map.Make(Bytes)
+module SHA1 = Digestif.SHA1
+module Radix = Radis.Make(struct
+    type t = SHA1.t
+
+    let get (x:t) = String.unsafe_get (SHA1.to_raw_string x)
+    let length _ = Digestif.SHA1.digest_size
+    let equal (a:t) (b:t) = String.equal (SHA1.to_raw_string a) (SHA1.to_raw_string b)
+    (* XXX(dinosaure): [SHA1.eq] avoids timing attack. *)
+  end)
+module Map = Map.Make(struct include SHA1 let compare = unsafe_compare end)
+(* XXX(dinosaure): [unsafe_compare] is [String.compare]. *)
 
 let drain buf chan =
   try while true do Buffer.add_channel buf chan 1 done
@@ -22,8 +30,8 @@ let objects =
   List.fold_left
     (fun acc line ->
       try match Astring.String.cut ~sep:" " line with
-          | Some (hash, value) -> (SHA1.of_hex (Bytes.unsafe_of_string hash), value) :: acc
-          | None -> (SHA1.of_hex (Bytes.unsafe_of_string line), "") :: acc
+          | Some (hash, value) -> (SHA1.of_hex hash, value) :: acc
+          | None -> (SHA1.of_hex line, "") :: acc
       with _ -> acc)
     []
     (Astring.String.cuts ~sep:"\n" out)
