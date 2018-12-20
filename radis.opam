@@ -7,18 +7,20 @@ bug-reports:  "https://github.com/dinosaure/radis/issues"
 dev-repo:     "https://github.com/dinosaure/radis.git"
 doc:          "https://dinosaure.github.io/radis/"
 license:      "MIT"
+synopsis:     "Radix tree on string"
 
 build: [
-  ["jbuilder" "subst" "-n" name] {pinned}
-  ["jbuilder" "build" "-p" name "-j" jobs]
+  ["dune" "subst"]
+  ["dune" "build" "-p" name "-j" jobs]
 ]
-build-test: [["jbuilder" "runtest" "-p" name "-j" jobs]]
+build-test: [["dune" "runtest" "-p" name "-j" jobs]]
 
 depends: [
-  "jbuilder" {build & >="1.0+beta9"}
+  "ocaml" {>= "4.06.0"}
+  "dune" {build}
   "fmt"
   "seq"
-  "alcotest" {test}
+  "alcotest" {with-test}
 ]
 
 available: [ocaml-version >= "4.06.0"]
